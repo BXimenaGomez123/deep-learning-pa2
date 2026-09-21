@@ -1,3 +1,6 @@
+default:
+  @just --choose
+
 download-dataset:
     if [ ! -d "data/MOT17" ]; then \
       curl -L -o data/MOT17.zip https://motchallenge.net/data/MOT17.zip; \
@@ -15,3 +18,11 @@ download-dataset-labels:
     fi
     @printf "Train: %s entries\n" $(ls "data/MOT17Labels/train" | wc -l)
     @printf "Test: %s entries\n" $(ls "data/MOT17Labels/test" | wc -l)
+
+test:
+    uv run pytest
+
+typecheck:
+    uvx ty check
+
+all_checks: typecheck test
