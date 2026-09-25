@@ -107,11 +107,9 @@ class SyntheticFrameDataset(Dataset):
         frames, boxes, ids = self.videos[v]
         # [H,W,3] uint8 -> [3,H,W] float in [0,1]
         image = torch.from_numpy(frames[t]).permute(2, 0, 1).float() / 255.0
-        target = {
-            "boxes": torch.from_numpy(boxes[t]).float(),
-            "ids": torch.from_numpy(ids[t]).long(),
-        }
-        return image, target
+        boxes = torch.from_numpy(boxes[t]).float()
+        ids = torch.from_numpy(ids[t]).int()
+        return image, boxes, ids
 
 
 # ---------- Parte 2: track-level dataset (unchanged, color-agnostic) ----------
