@@ -12,6 +12,7 @@
   - `device.py` — PyTorch device selection.
 - `tests/` — pytest tests, organized around package modules. `utils.py` contains shared test helpers.
 - `scripts/` — runnable examples and visualization scripts.
+- `weights/` — stored weights from trained models; weights are not commited.
 - `data/` — local MOT17 images and labels; dataset files may not be present in every checkout.
 - `justfile` — project tasks, including dataset downloads and checks.
 
