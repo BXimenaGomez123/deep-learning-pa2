@@ -118,11 +118,11 @@ class SyntheticTrackDataset(Dataset):
     """One sample = one track's box sequence over a window of T frames,
     built with sliding-window overlap (stride < T)."""
 
-    def __init__(self, n_videos=20, T=16, stride=4, **gen_kwargs):
+    def __init__(self, n_videos=20, T=16, stride=4, seed_offset=0, **gen_kwargs):
         self.T = T
         self.samples = []
         for v in range(n_videos):
-            frames, boxes, ids = generate_synthetic_video(seed=v, **gen_kwargs)
+            frames, boxes, ids = generate_synthetic_video(seed=seed_offset + v, **gen_kwargs)
             n_frames = len(frames)
 
             all_ids = sorted(set(int(i) for f in ids for i in f))
