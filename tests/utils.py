@@ -1,4 +1,37 @@
 import pytest
+import numpy as np
+from PIL import Image
+
+
+def make_fake_mot17(
+    root,
+    sequence_numbers=("02", "04", "05", "09", "10", "11", "13"),
+    n_frames=3,
+    image_size=(8, 8),
+    include_distractor=False,
+):
+    """Create a small MOT17-style image/label tree for dataset tests."""
+    height, width = image_size
+    for sequence_number in sequence_numbers:
+        name = f"MOT17-{sequence_number}-SDP"
+        sequence_dir = root / "MOT17" / "train" / name
+        image_dir = sequence_dir / "img1"
+        image_dir.mkdir(parents=True)
+        (sequence_dir / "seqinfo.ini").write_text(
+            f"[Sequence]\nname={name}\nimDir=img1\nimExt=.jpg\n"
+        )
+
+        gt_dir = root / "MOT17Labels" / "train" / name / "gt"
+        gt_dir.mkdir(parents=True)
+        annotations = []
+        for frame in range(1, n_frames + 1):
+            image = np.full((height, width, 3), frame * 40, dtype=np.uint8)
+            Image.fromarray(image).save(image_dir / f"{frame:06d}.jpg")
+            annotations.append(f"{frame},7,1,2,3,4,1,1,1")
+            if include_distractor:
+                annotations.append(f"{frame},99,2,2,3,4,1,7,1")
+        (gt_dir / "gt.txt").write_text("\n".join(annotations) + "\n")
+    return root
 
 
 def tensor_like(tensor, shape=None, dtype=None):

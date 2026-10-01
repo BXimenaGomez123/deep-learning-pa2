@@ -188,6 +188,7 @@ class MOT17TrackDataset(Dataset):
 
         self.T = T
         self.samples = []
+        self.sample_sequences = []
         for sequence in _load_sequences(Path(root), split):
             frame_to_index = {frame: index for index, frame in enumerate(sequence.frame_numbers)}
             all_ids = sorted({int(object_id) for values in sequence.ids.values() for object_id in values})
@@ -208,6 +209,7 @@ class MOT17TrackDataset(Dataset):
                             valid[offset] = 1.0
                     if valid.sum() >= 2:
                         self.samples.append((box_seq, valid))
+                        self.sample_sequences.append(sequence.name)
 
     def __len__(self):
         return len(self.samples)

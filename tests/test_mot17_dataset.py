@@ -1,35 +1,15 @@
-import numpy as np
 import pytest
 import torch
-from PIL import Image
 
 from pa2.mot17_dataset import MOT17FrameDataset, MOT17TrackDataset
-
-
-def make_tiny_mot17(root):
-    sequence = root / "MOT17" / "train" / "MOT17-02-SDP"
-    image_dir = sequence / "img1"
-    image_dir.mkdir(parents=True)
-    (sequence / "seqinfo.ini").write_text(
-        "[Sequence]\nname=MOT17-02-SDP\nimDir=img1\nimExt=.jpg\n"
-    )
-    for frame in (1, 2):
-        image = np.full((6, 8, 3), frame * 40, dtype=np.uint8)
-        Image.fromarray(image).save(image_dir / f"{frame:06d}.jpg")
-
-    gt_dir = root / "MOT17Labels" / "train" / "MOT17-02-SDP" / "gt"
-    gt_dir.mkdir(parents=True)
-    # Valid person track plus a non-pedestrian class that should be ignored.
-    (gt_dir / "gt.txt").write_text(
-        "1,7,1,2,3,4,1,1,1\n"
-        "1,99,2,2,3,4,1,7,1\n"
-        "2,7,2,3,3,4,1,1,1\n"
-    )
-    return root
+from utils import make_fake_mot17
 
 
 def test_mot17_frame_shapes_and_types(tmp_path):
-    dataset = MOT17FrameDataset(root=make_tiny_mot17(tmp_path))
+    root = make_fake_mot17(
+        tmp_path, sequence_numbers=("02",), n_frames=2, image_size=(6, 8), include_distractor=True
+    )
+    dataset = MOT17FrameDataset(root=root)
 
     image, boxes, ids = dataset[0]
 
@@ -43,7 +23,8 @@ def test_mot17_frame_shapes_and_types(tmp_path):
 
 
 def test_mot17_track_shapes_and_types(tmp_path):
-    dataset = MOT17TrackDataset(root=make_tiny_mot17(tmp_path), T=2, stride=1)
+    root = make_fake_mot17(tmp_path, sequence_numbers=("02",), n_frames=2)
+    dataset = MOT17TrackDataset(root=root, T=2, stride=1)
 
     boxes, valid = dataset[0]
 

@@ -3,8 +3,10 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from typing import cast
 
 from pa2.box_corruption import corrupt_track_boxes
+from pa2.datasets import make_mot17_frame_splits
 from pa2.mot17_dataset import MOT17FrameDataset
 from pa2.plotting import plot_video
 from pa2.synthetic_dataset import SyntheticFrameDataset
@@ -62,11 +64,12 @@ def main():
 
     show_video(frames, corrupted_boxes, corrupted_ids, "Synthetic ellipses — corrupted track")
 
-    mot17 = MOT17FrameDataset(root="data", split="train")
-    sequence_index = next(
-        i for i, sequence in enumerate(mot17.sequences) if sequence.name == "MOT17-02-SDP"
-    )
-    indices = [i for i, (seq, _) in enumerate(mot17.index) if seq == sequence_index][:N_FRAMES]
+    mot17 = make_mot17_frame_splits()["train"]
+    base_dataset = cast(MOT17FrameDataset, mot17.dataset)
+    indices = [
+        i for i, base_index in enumerate(mot17.indices)
+        if base_dataset.sequences[base_dataset.index[base_index][0]].name == "MOT17-02-SDP"
+    ][:N_FRAMES]
     mot_frames, mot_boxes, mot_ids = [], [], []
     for index in indices:
         image, frame_boxes, frame_ids = mot17[index]

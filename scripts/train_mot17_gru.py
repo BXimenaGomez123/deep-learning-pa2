@@ -7,14 +7,14 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from pa2.datasets import make_mot17_track_splits
 from pa2.gru_model import GRUSequenceModel
-from pa2.mot17_dataset import MOT17TrackDataset
 
 
 def main():
     torch.manual_seed(0)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dataset = MOT17TrackDataset(root="data", split="train", T=16, stride=4)
+    dataset = make_mot17_track_splits(T=16, stride=4)["train"]
     loader = DataLoader(dataset, batch_size=256, shuffle=True)
     model = GRUSequenceModel(input_size=4, hidden_size=32, output_size=4).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
