@@ -23,6 +23,6 @@ test:
     uv run pytest
 
 typecheck:
-    uvx ty check
+    uvx ty check --exclude "**/*.ipynb"
 
 all_checks: typecheck test

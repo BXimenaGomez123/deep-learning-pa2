@@ -1,6 +1,5 @@
 """Track MOT17 pedestrians with Faster R-CNN detections and the trained GRU."""
 
-from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.animation as animation
@@ -15,8 +14,8 @@ from torchvision.models.detection import (
 
 from pa2.datasets import make_mot17_frame_splits
 from pa2.gru_model import GRUSequenceModel
-from pa2.metrics import Box, match_frame
 from pa2.mot17_dataset import MOT17FrameDataset
+from pa2.tracking import GRUTracker
 
 
 SEQUENCE_NAME = "MOT17-13-SDP"
@@ -27,32 +26,7 @@ MAX_MISSED_FRAMES = 3
 HISTORY_LENGTH = 15
 
 
-@dataclass
-class Track:
-    """A track's observed/predicted box history and missed-frame count."""
-
-    boxes: list[Box]
-    missed_frames: int = 0
-
-
-def match_predictions_to_detections(
-    predicted_boxes: list[Box],
-    track_ids: list[int],
-    detected_boxes: list[Box],
-    iou_threshold: float = IOU_THRESHOLD,
-) -> list[tuple[int, int]]:
-    """Return (track ID, detection index) pairs matched by Hungarian IoU."""
-    detection_indices = list(range(len(detected_boxes)))
-    return match_frame(
-        predicted_boxes,
-        track_ids,
-        detected_boxes,
-        detection_indices,
-        iou_thresh=iou_threshold,
-    )
-
-
-def detect_people(detector, image: torch.Tensor, device: torch.device) -> list[Box]:
+def detect_people(detector, image: torch.Tensor, device: torch.device) -> list[tuple[int, int, int, int]]:
     """Run Faster R-CNN and return confident person boxes in (x, y, w, h)."""
     output = detector([image.to(device)])[0]
     people = (output["labels"] == 1) & (
@@ -65,28 +39,6 @@ def detect_people(detector, image: torch.Tensor, device: torch.device) -> list[B
             (round(x1), round(y1), max(1, round(x2 - x1)), max(1, round(y2 - y1)))
         )
     return boxes
-
-
-def predict_next_box(
-    model: GRUSequenceModel,
-    track: Track,
-    scale: torch.Tensor,
-    image_size: tuple[int, int],
-    device: torch.device,
-) -> Box:
-    """Predict a track's next pixel-space box and clip it to the image."""
-    history = torch.tensor(
-        track.boxes[-HISTORY_LENGTH:], dtype=torch.float32, device=device
-    ).unsqueeze(0)
-    prediction, _ = model(history / scale)
-    x, y, width, height = (prediction[0, -1] * scale).tolist()
-
-    image_height, image_width = image_size
-    x = min(max(round(x), 0), image_width - 1)
-    y = min(max(round(y), 0), image_height - 1)
-    width = min(max(round(width), 1), image_width - x)
-    height = min(max(round(height), 1), image_height - y)
-    return x, y, width, height
 
 
 def load_test_sequence(root: str = "data"):
@@ -174,9 +126,14 @@ def main():
     print(f"Loading frames from {SEQUENCE_NAME}...", flush=True)
     dataset, frame_indices = load_test_sequence()
     print(f"Prepared {len(frame_indices)} frames for tracking.", flush=True)
-    scale = torch.tensor([1920.0, 1080.0, 1920.0, 1080.0], device=device)
-    tracks: dict[int, Track] = {}
-    next_track_id = 0
+    tracker = GRUTracker(
+        model,
+        device,
+        scale=(1920.0, 1080.0, 1920.0, 1080.0),
+        iou_threshold=IOU_THRESHOLD,
+        max_missed_frames=MAX_MISSED_FRAMES,
+        history_length=HISTORY_LENGTH,
+    )
     frames = []
     detections_per_frame = []
     tracks_per_frame = []
@@ -188,56 +145,16 @@ def main():
             image, _, _ = dataset[frame_index]
             detections = detect_people(detector, image, device)
             image_height, image_width = image.shape[1:]
-
-            track_ids = list(tracks)
-            predictions = [
-                predict_next_box(
-                    model, tracks[track_id], scale, (image_height, image_width), device
-                )
-                for track_id in track_ids
-            ]
-            matches = match_predictions_to_detections(
-                predictions, track_ids, detections
-            )
-            detection_for_track = {
-                track_id: detection_index
-                for track_id, detection_index in matches
-            }
-            matched_detection_indices = set(detection_for_track.values())
-
-            active_tracks = {}
-            visible_tracks = []
-            for track_id, predicted_box in zip(track_ids, predictions):
-                track = tracks[track_id]
-                visible_tracks.append((predicted_box, track_id))
-                if track_id in detection_for_track:
-                    track.boxes.append(detections[detection_for_track[track_id]])
-                    track.missed_frames = 0
-                    active_tracks[track_id] = track
-                else:
-                    track.boxes.append(predicted_box)
-                    track.missed_frames += 1
-                    if track.missed_frames <= MAX_MISSED_FRAMES:
-                        active_tracks[track_id] = track
-
-            for detection_index, box in enumerate(detections):
-                if detection_index in matched_detection_indices:
-                    continue
-                track_id = next_track_id
-                next_track_id += 1
-                active_tracks[track_id] = Track(boxes=[box])
-                visible_tracks.append((box, track_id))
-
-            tracks = active_tracks
+            result = tracker.update(detections, (image_height, image_width))
             frames.append(
                 (image.permute(1, 2, 0).mul(255).byte().cpu().numpy())
             )
             detections_per_frame.append(detections)
-            tracks_per_frame.append(visible_tracks)
+            tracks_per_frame.append(result.predictions)
             progress.set_postfix(
                 detections=len(detections),
-                matches=len(matches),
-                active_tracks=len(tracks),
+                matches=result.matches,
+                active_tracks=result.active_tracks,
             )
 
     print("Inference complete. Opening the tracking animation; close its window to exit.", flush=True)
