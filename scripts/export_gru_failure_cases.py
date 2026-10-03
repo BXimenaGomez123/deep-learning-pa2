@@ -26,12 +26,13 @@ TARGET_IDENTITIES = (86, 93, 74)
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    detector = fasterrcnn_resnet50_fpn(
-        weights=FasterRCNN_ResNet50_FPN_Weights.DEFAULT
-    ).to(device).eval()
-    model = GRUSequenceModel(input_size=4, hidden_size=32, output_size=4).to(device)
+    model = GRUSequenceModel(input_size=5, hidden_size=32, output_size=4).to(device)
     model.load_state_dict(
-        torch.load(ROOT / "weights" / "mot17_gru.pt", map_location=device, weights_only=True)
+        torch.load(
+            ROOT / "weights" / "mot17_gru_corrupt.pt",
+            map_location=device,
+            weights_only=True,
+        )
     )
     model.eval()
 
@@ -54,6 +55,31 @@ def main():
         for index, (source_index, _) in enumerate(dataset.index)
         if source_index == sequence_index
     ]
+    cache_path = ROOT / "outputs" / "mot17_04_sdp_frcnn_detections.pt"
+    if cache_path.is_file():
+        detections_cache = torch.load(cache_path, map_location="cpu", weights_only=True)
+        if not isinstance(detections_cache, list):
+            raise ValueError(f"Invalid detection cache at {cache_path}")
+    else:
+        detections_cache = []
+
+    if len(detections_cache) < len(dataset_indices):
+        detector = fasterrcnn_resnet50_fpn(
+            weights=FasterRCNN_ResNet50_FPN_Weights.DEFAULT
+        ).to(device).eval()
+        for position in tqdm(
+            range(len(detections_cache), len(dataset_indices)),
+            desc=f"Detecting {SEQUENCE_NAME}",
+            unit="frame",
+        ):
+            image, _, _ = dataset[dataset_indices[position]]
+            detections_cache.append(detect_people(detector, image, device))
+            if (position + 1) % 20 == 0 or position + 1 == len(dataset_indices):
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                temporary_path = cache_path.with_suffix(".tmp")
+                torch.save(detections_cache, temporary_path)
+                temporary_path.replace(cache_path)
+
     frame_numbers = list(sequence.frame_numbers)
     gt_boxes: list[list[Box]] = []
     gt_ids: list[list[int]] = []
@@ -67,14 +93,18 @@ def main():
         iou_threshold=IOU_THRESHOLD,
         max_missed_frames=MAX_MISSED_FRAMES,
         history_length=HISTORY_LENGTH,
+        include_observation_mask=True,
     )
 
     with torch.inference_mode():
-        for dataset_index in tqdm(dataset_indices, desc=SEQUENCE_NAME, unit="frame"):
+        sample_image, _, _ = dataset[dataset_indices[0]]
+        image_size = (sample_image.shape[1], sample_image.shape[2])
+        for position, dataset_index in enumerate(
+            tqdm(dataset_indices, desc=f"Tracking {SEQUENCE_NAME}", unit="frame")
+        ):
             image, boxes, identities = dataset[dataset_index]
-            detections = detect_people(detector, image, device)
-            image_height, image_width = image.shape[1:]
-            result = tracker.update(detections, (image_height, image_width))
+            detections = detections_cache[position]
+            result = tracker.update(detections, image_size)
             tracking_results.append(result)
             gt_boxes.append(
                 [(int(box[0]), int(box[1]), int(box[2]), int(box[3])) for box in boxes]
@@ -82,7 +112,7 @@ def main():
             gt_ids.append([int(identity) for identity in identities.tolist()])
             pred_boxes.append([box for box, _ in result.detections])
             pred_ids.append([track_id for _, track_id in result.detections])
-            image_sizes.append((image_height, image_width))
+            image_sizes.append(image_size)
 
     identity_errors = analyze_identity_errors(
         gt_boxes,

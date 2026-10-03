@@ -61,6 +61,7 @@ class TrackingResult:
 @dataclass
 class _Track:
     boxes: list[Box]
+    observed: list[bool]
     missed_frames: int = 0
 
 
@@ -75,6 +76,7 @@ class GRUTracker:
         iou_threshold: float = 0.3,
         max_missed_frames: int = 3,
         history_length: int = 15,
+        include_observation_mask: bool = False,
     ):
         if max_missed_frames < 0:
             raise ValueError("max_missed_frames must be non-negative")
@@ -86,16 +88,27 @@ class GRUTracker:
         self.iou_threshold = iou_threshold
         self.max_missed_frames = max_missed_frames
         self.history_length = history_length
+        self.include_observation_mask = include_observation_mask
         self.tracks: dict[int, _Track] = {}
         self.next_track_id = 1
 
     def _predict_next_box(
         self, track: _Track, image_size: tuple[int, int]
     ) -> Box:
-        history = torch.tensor(
+        boxes = torch.tensor(
             track.boxes[-self.history_length :], dtype=torch.float32, device=self.device
         ).unsqueeze(0)
-        predictions, _ = self.model(history / self.scale)
+        history = boxes / self.scale
+        if self.include_observation_mask:
+            observed_values = track.observed[-self.history_length :]
+            observed = torch.tensor(
+                observed_values,
+                dtype=torch.float32,
+                device=self.device,
+            ).view(1, -1, 1)
+            history = history * observed
+            history = torch.cat((history, observed), dim=-1)
+        predictions, _ = self.model(history)
         x, y, width, height = (predictions[0, -1] * self.scale).tolist()
 
         image_height, image_width = image_size
@@ -132,10 +145,12 @@ class GRUTracker:
             track = self.tracks[track_id]
             if track_id in track_to_detection:
                 track.boxes.append(detections[track_to_detection[track_id]])
+                track.observed.append(True)
                 track.missed_frames = 0
                 active_tracks[track_id] = track
             else:
                 track.boxes.append(predicted_box)
+                track.observed.append(False)
                 track.missed_frames += 1
                 if track.missed_frames <= self.max_missed_frames:
                     active_tracks[track_id] = track
@@ -145,7 +160,7 @@ class GRUTracker:
                 continue
             track_id = self.next_track_id
             self.next_track_id += 1
-            active_tracks[track_id] = _Track(boxes=[box])
+            active_tracks[track_id] = _Track(boxes=[box], observed=[True])
             detection_to_track[detection_index] = track_id
             visible_predictions.append((box, track_id))
 
